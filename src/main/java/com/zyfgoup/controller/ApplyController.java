@@ -16,6 +16,8 @@ import com.zyfgoup.entity.ConferenceRoom;
 import com.zyfgoup.service.ApplyService;
 import com.zyfgoup.service.ConferenceRecordService;
 import com.zyfgoup.service.ConferenceRoomService;
+import com.zyfgoup.shiro.AccountProfile;
+import org.apache.shiro.SecurityUtils;
 import org.apache.shiro.authz.annotation.Logical;
 import org.apache.shiro.authz.annotation.RequiresRoles;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.UnsupportedEncodingException;
 import java.sql.Date;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -77,6 +80,22 @@ public class ApplyController {
 
         Apply apply = record.getApply();
         ConferenceRecord conferenceRecord = record.getConferenceRecord();
+
+        if(apply == null || apply.getRoomId() == null){
+            return Result.fail("申请信息不完整，请重新选择会议室");
+        }
+        //e_id 在表里是 NOT NULL 且没有默认值  前端没有传这个字段
+        //这里补成当前登录的账号id（员工id或部门id）  不处理会报 Field 'e_id' doesn't have a default value
+        if(StrUtil.isBlank(apply.getEId())){
+            apply.setEId(StrUtil.blankToDefault(currentUserId(),""));
+        }
+        //前端虽然已经校验过时间  但接口自己也要判断一次
+        //否则绕过页面直接调用接口可以写入已经过去的时间或者与已有会议冲突的申请
+        String error = checkTime(apply.getRoomId(),conferenceRecord);
+        if(error != null){
+            return Result.fail(error);
+        }
+
         applyService.save(apply);
 
         //要设置外键
@@ -100,11 +119,25 @@ public class ApplyController {
 
         Apply apply = record.getApply();
         ConferenceRecord conferenceRecord = record.getConferenceRecord();
+
+        if(apply == null || apply.getRoomId() == null){
+            return Result.fail("申请信息不完整，请重新选择会议室");
+        }
+        //管理员是代部门申请  没有具体的员工  与表里历史数据保持一致存空串
+        //（e_id 在表里是 NOT NULL 且没有默认值 不赋值会插入失败）
+        if(StrUtil.isBlank(apply.getEId())){
+            apply.setEId("");
+        }
+        String error = checkTime(apply.getRoomId(),conferenceRecord);
+        if(error != null){
+            return Result.fail(error);
+        }
+
         applyService.save(apply);
 
         System.out.println(apply);
 
-        //直接通过  因为时间冲突在前端判断过了  save会将id回显给apply
+        //直接通过  时间冲突已经在checkTime里判断过了
         applyService.update(new UpdateWrapper<Apply>().eq("apply_id",apply.getApplyId())
         .set("audit_state",1));
 
@@ -114,6 +147,56 @@ public class ApplyController {
 
         return Result.succ("");
 
+    }
+
+
+    /**
+     * 取当前登录账号的id  可能是员工id、部门id或者管理员id（认证时放在 AccountProfile 里）
+     */
+    private String currentUserId(){
+        Object principal = SecurityUtils.getSubject().getPrincipal();
+        if(principal instanceof AccountProfile){
+            return ((AccountProfile) principal).getId();
+        }
+        return null;
+    }
+
+
+    /**
+     * 保存申请前的时间合法性校验
+     * 规则与页面保持一致：结束时间晚于开始时间、会议最短10分钟、开始时间不能早于当前时间、
+     * 会议室使用时间为每天的10点到23点、所选时间段不能与该会议室已审核通过的会议冲突
+     *
+     * @return 校验不通过时的提示语  校验通过返回 null
+     */
+    private String checkTime(Integer roomId, ConferenceRecord conferenceRecord){
+
+        if(conferenceRecord == null){
+            return "申请信息不完整，请重新填写会议信息";
+        }
+        LocalDateTime startTime = conferenceRecord.getStartTime();
+        LocalDateTime endTime = conferenceRecord.getEndTime();
+
+        if(startTime == null || endTime == null){
+            return "请选择会议的开始时间和结束时间";
+        }
+        if(!endTime.isAfter(startTime)){
+            return "结束时间必须晚于开始时间";
+        }
+        if(Duration.between(startTime,endTime).toMinutes() < 10){
+            return "会议时间最短为10分钟";
+        }
+        //留10分钟容错  避免用户选的是"此刻" 提交上来时已经过去几秒被判为非法
+        if(startTime.isBefore(LocalDateTime.now().minusMinutes(10))){
+            return "开始时间不能早于当前时间";
+        }
+        if(startTime.getHour() < 10 || endTime.getHour() >= 23){
+            return "会议室的使用时间为每天的10:00-23:00";
+        }
+        if(applyService.searchTimeConflict(roomId,startTime,endTime,null).size() > 0){
+            return "该时间段已被占用，请选择其他时间或者会议室";
+        }
+        return null;
     }
 
 
@@ -131,7 +214,7 @@ public class ApplyController {
                                      @PathVariable("endTime")  @DateTimeFormat(pattern="yyyy-MM-dd HH:mm:ss") LocalDateTime endTime){
 
 
-        List<Integer> listApplyId = applyService.searchTimeConflict(roomId,startTime,endTime);
+        List<Integer> listApplyId = applyService.searchTimeConflict(roomId,startTime,endTime,null);
 
         if(listApplyId.size()>0){
             return Result.succ("0");

@@ -42,7 +42,8 @@ public class GlobalExceptionHandler {
         return Result.fail(401,"未登录 不允许操作", null);
     }
 
-    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    //已登录但是没有该角色  属于授权失败  应该返回403 而不是401（401是"没登录"）
+    @ResponseStatus(HttpStatus.FORBIDDEN)
     @ExceptionHandler(value = UnauthorizedException.class)
     public Result handler(UnauthorizedException e) {
         log.error("运行时异常：----------------{}", e);

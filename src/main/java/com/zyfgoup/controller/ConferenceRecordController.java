@@ -9,9 +9,12 @@ import com.zyfgoup.common.dto.Conditions;
 import com.zyfgoup.common.lang.Result;
 import com.zyfgoup.entity.Apply;
 import com.zyfgoup.entity.ConferenceRoom;
+import com.zyfgoup.entity.Employee;
 import com.zyfgoup.entity.group.ConRApplyRecord;
 import com.zyfgoup.quartz.EmailJobDetail;
 import com.zyfgoup.service.*;
+import com.zyfgoup.shiro.AccountProfile;
+import com.zyfgoup.util.ShiroUtil;
 import io.swagger.models.auth.In;
 import org.apache.shiro.authz.annotation.Logical;
 import org.apache.shiro.authz.annotation.RequiresRoles;
@@ -47,6 +50,33 @@ public class ConferenceRecordController {
 
     @Autowired
     QuartzServie quartzServie;
+
+    @Autowired
+    EmployeeService employeeService;
+
+
+    /**
+     * 判断当前登录的用户能不能操作这条申请
+     * 管理员可以操作所有；部门账号只能操作本部门的申请；员工账号只能操作自己所属部门的申请
+     * （页面上的申请记录本来就是按部门展示的，所以按部门维度校验）
+     */
+    private boolean canOperate(Apply apply){
+        AccountProfile profile = ShiroUtil.getProfile();
+        if(profile == null || apply == null){
+            return false;
+        }
+        if("admin".equals(profile.getRole())){
+            return true;
+        }
+        String depId = apply.getDepId() == null ? null : String.valueOf(apply.getDepId());
+        //部门账号登录时 用户名里存的id就是部门id
+        if(depId != null && depId.equals(profile.getId())){
+            return true;
+        }
+        //员工账号登录时 用户名里存的是员工id  要查一下所属部门
+        Employee employee = employeeService.getById(profile.getId());
+        return employee != null && depId != null && depId.equals(employee.getDepId());
+    }
 
 
     /**
@@ -112,7 +142,9 @@ public class ConferenceRecordController {
             DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
             LocalDateTime startTime = LocalDateTime.parse((String) map.get("startTime"), DATETIME_FORMATTER);
             LocalDateTime endTime = LocalDateTime.parse((String) map.get("endTime"), DATETIME_FORMATTER);
-            List<Integer> list = applyService.searchTimeConflict((Integer) map.get("roomId"), startTime, endTime);
+            //要排除自己这条申请  因为此时它还处于"审核中"  不排除的话会跟自己判为冲突
+            Integer applyId = (Integer) map.get("applyId");
+            List<Integer> list = applyService.searchTimeConflict((Integer) map.get("roomId"), startTime, endTime, applyId);
             if (list.size() > 0) {
                 return Result.fail("无法通过,时间已冲突,请驳回请求并说明理由");
             } else {
@@ -132,16 +164,19 @@ public class ConferenceRecordController {
                 Date date1 = simpleDateFormat1.parse((String)map.get("startTime"));
                 long time2 = date1.getTime()-(15*60*1000);
 
-              Map<String,Object> map1 = new HashMap<>();
-              map1.put("theme",map.get("theme"));
-              map1.put("depEmail",map.get("depEmail"));
-              map1.put("roomFloor",map.get("roomFloor"));
-                map1.put("roomNo",map.get("roomNo"));
-                map1.put("startTime",map.get("startTime"));
-                map1.put("endTime",map.get("endTime"));
-                //System.out.println(map1);
+                //开始前15分钟那个时间点已经过了 就不用再排这个提醒任务了（否则会立刻补发一封）
+                if(time2 > System.currentTimeMillis()) {
+                    Map<String,Object> map1 = new HashMap<>();
+                    map1.put("theme",map.get("theme"));
+                    map1.put("depEmail",map.get("depEmail"));
+                    map1.put("roomFloor",map.get("roomFloor"));
+                    map1.put("roomNo",map.get("roomNo"));
+                    map1.put("startTime",map.get("startTime"));
+                    map1.put("endTime",map.get("endTime"));
+                    //System.out.println(map1);
 
-                quartzServie.startJob(time2,UUID.randomUUID().toString(),EmailJobDetail.class,map1);
+                    quartzServie.startJob(time2,UUID.randomUUID().toString(),EmailJobDetail.class,map1);
+                }
                 return Result.succ("");
             }
         }else{
@@ -172,8 +207,18 @@ public class ConferenceRecordController {
     @RequiresRoles(value = {"admin","user"},logical = Logical.OR)
     public Result recallApply(@RequestBody Map<String,Object> map){
 
+        Integer applyId = (Integer)map.get("applyId");
+        Apply apply = applyService.getById(applyId);
+        if(apply == null){
+            return Result.fail("申请不存在或已被删除");
+        }
+        //不能撤销别的部门的申请
+        if(!canOperate(apply)){
+            return Result.fail("只能撤销本部门的申请");
+        }
+
         //删除了这个 conference_record表里的外键为applyId=这个的也会删除  级联
-        applyService.removeById((Integer)map.get("applyId"));
+        applyService.removeById(applyId);
 
         return  Result.succ("");
     }
@@ -201,6 +246,15 @@ public class ConferenceRecordController {
     @DeleteMapping("/delete/{applyId}")
     @RequiresRoles("user")
     public Result deleteByIdUser(@PathVariable("applyId") Integer applyId){
+
+        Apply apply = applyService.getById(applyId);
+        if(apply == null){
+            return Result.fail("申请不存在或已被删除");
+        }
+        //不能删除别的部门的申请记录
+        if(!canOperate(apply)){
+            return Result.fail("只能删除本部门的申请记录");
+        }
 
         applyService.update(new UpdateWrapper<Apply>().eq("apply_id",applyId)
         .set("deleted",1)

@@ -26,7 +26,7 @@ public class ApplyServiceImpl extends ServiceImpl<ApplyMapper, Apply> implements
 
 
     @Override
-    public List<Integer> searchTimeConflict(Integer roomId, LocalDateTime startTime, LocalDateTime endTime) {
-        return applyMapper.searchTimeConflict(roomId,startTime,endTime);
+    public List<Integer> searchTimeConflict(Integer roomId, LocalDateTime startTime, LocalDateTime endTime, Integer excludeApplyId) {
+        return applyMapper.searchTimeConflict(roomId,startTime,endTime,excludeApplyId);
     }
 }

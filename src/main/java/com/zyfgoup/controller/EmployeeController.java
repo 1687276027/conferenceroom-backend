@@ -11,6 +11,9 @@ import com.zyfgoup.entity.Device;
 import com.zyfgoup.entity.Employee;
 import com.zyfgoup.service.DepartmentService;
 import com.zyfgoup.service.EmployeeService;
+import com.zyfgoup.shiro.AccountProfile;
+import com.zyfgoup.util.ShiroUtil;
+import org.apache.shiro.authz.annotation.Logical;
 import org.apache.shiro.authz.annotation.RequiresRoles;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -35,9 +38,27 @@ public class EmployeeController {
     @Autowired
     DepartmentService departmentService;
 
+    /**
+     * 员工信息里包含部门、邮箱等  不能让任何登录用户随意查看别人的信息
+     * 管理员可以查所有人  普通用户（部门账号/员工账号）只能查自己
+     */
+    private boolean canView(String eId){
+        AccountProfile profile = ShiroUtil.getProfile();
+        if(profile == null){
+            return false;
+        }
+        if("admin".equals(profile.getRole())){
+            return true;
+        }
+        return profile.getId() != null && profile.getId().equals(eId);
+    }
+
     @GetMapping("get/{eId}")
-    @RequiresRoles("user")
+    @RequiresRoles(value = {"admin","user"},logical = Logical.OR)
     public Result getById(@PathVariable("eId") String eId){
+        if(!canView(eId)){
+            return Result.fail("只能查看自己的员工信息");
+        }
         return Result.succ(employeeService.getById(eId));
     }
 
@@ -48,9 +69,15 @@ public class EmployeeController {
      * @return
      */
     @GetMapping("getInfo/{eId}")
-    @RequiresRoles("user")
+    @RequiresRoles(value = {"admin","user"},logical = Logical.OR)
     public Result getInfo(@PathVariable("eId") String eId){
+        if(!canView(eId)){
+            return Result.fail("只能查看自己的员工信息");
+        }
         Employee employee = employeeService.getById(eId);
+        if(employee == null){
+            return Result.fail("员工不存在");
+        }
         Department department = departmentService.getById(employee.getDepId());
         return Result.succ(new EmployeeInfo(employee,department));
     }
