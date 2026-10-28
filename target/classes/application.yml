@@ -1,0 +1,67 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/meeting?useUnicode=true&useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password: 123456
+    type: com.alibaba.druid.pool.DruidDataSource
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    password: 123456
+    database: 0
+  mail:
+    #邮件协议smtp
+    host: smtp.qq.com
+    #端口用465  对应下面的 ssl.enable   （如果改成587 则要把ssl关掉、starttls打开）
+    port: 465
+    #发送者的邮箱
+    username: 1687276027@qq.com
+    #使用的编码
+    default-encoding: utf-8
+    #这里的密码不是QQ密码 是QQ邮箱的SMTP授权码(16位)
+    #获取方式：QQ邮箱网页版 -> 设置 -> 账户 -> 开启"POP3/SMTP服务" -> 按提示发短信后生成授权码
+    password: ncakbxdhtwcnbghc
+    properties:
+      mail:
+        smtp:
+          #需要登录认证
+          auth: true
+          #465端口走SSL
+          ssl:
+            enable: true
+          #超时时间(毫秒)  避免邮箱服务器不通时请求一直挂着
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**Mapper.xml
+  #驼峰 默认开启
+  configuration:
+    map-underscore-to-camel-case: true
+
+#    输出到日志文件中 org.apache.ibatis.logging.slf4j.Slf4jImpl
+# 如果是控制台 org.apache.ibatis.logging.stdout.StdOutImpl
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+server:
+  port: 8888
+
+
+
+shiro-redis:
+  enabled: true
+  redis-manager:
+    host: 127.0.0.1:6379
+    password: 123456
+
+zyfgoup:
+  jwt:
+    secret: f4e2e52034348f86b67cde581c0f9eb5
+#token 过期时间 秒 7天
+    expire: 604800
+    header: Authorization
+
+
+
